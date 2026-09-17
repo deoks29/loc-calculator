@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>미주 LOC 매매 계산기</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #f4f6f8; margin: 0; padding: 15px; color: #333; }
+        h2 { text-align: center; color: #1a2530; margin-bottom: 15px; }
+        .card { background: white; border-radius: 12px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .stock-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #edf2f7; padding-bottom: 8px; margin-bottom: 10px; }
+        .stock-title { font-size: 18px; font-weight: bold; color: #2b6cb0; }
+        .input-group { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        label { font-size: 14px; color: #4a5568; }
+        input { width: 90px; padding: 6px; border: 1px solid #cbd5e0; border-radius: 6px; text-align: right; font-size: 14px; }
+        .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; background: #f7fafc; padding: 10px; border-radius: 8px; }
+        .res-box { font-size: 13px; }
+        .res-label { color: #718096; font-size: 11px; }
+        .res-val { font-weight: bold; color: #2d3748; margin-top: 2px; }
+        .buy { color: #e53e3e; }
+        .sell { color: #3182ce; }
+        button { width: 100%; padding: 12px; background: #3182ce; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <h2>LOC 매매 가격 계산기</h2>
+    <button onclick="calculateAll()">전일종가 불러오기 & 계산</button>
+
+    <div id="app"></div>
+
+    <script>
+        const stocks = [
+            { symbol: 'SOXL', ratio: { b1: 1.10, b2: -0.42, s1: 4.86, s2: 14.49 } },
+            { symbol: 'AAOI', ratio: { b1: 1.10, b2: -0.42, s1: 4.86, s2: 14.49 } },
+            { symbol: 'TQQQ', ratio: { b1: 1.10, b2: -0.42, s1: 4.86, s2: 14.49 } },
+            { symbol: 'DRAM', ratio: { b1: 1.10, b2: -0.42, s1: 4.86, s2: 14.49 } }
+        ];
+
+        // 초기 화면 생성
+        function init() {
+            const container = document.getElementById('app');
+            stocks.forEach(s => {
+                const savedAvg = localStorage.getItem(s.symbol + '_avg') || '';
+                const html = `
+                    <div class="card" id="card-${s.symbol}">
+                        <div class="stock-header">
+                            <span class="stock-title">${s.symbol}</span>
+                            <span id="close-${s.symbol}" style="font-size: 13px; color: #718096;">전종: -</span>
+                        </div>
+                        <div class="input-group">
+                            <label>평균단가 ($)</label>
+                            <input type="number" step="0.01" id="avg-${s.symbol}" value="${savedAvg}" onchange="saveAvg('${s.symbol}', this.value)">
+                        </div>
+                        <div class="result-grid">
+                            <div class="res-box"><div class="res-label">1차 매수 (전종 +1.10%)</div><div class="res-val buy" id="b1-${s.symbol}">-</div></div>
+                            <div class="res-box"><div class="res-label">2차 매수 (전종 -0.42%)</div><div class="res-val buy" id="b2-${s.symbol}">-</div></div>
+                            <div class="res-box"><div class="res-label">1차 매도 (평단 +4.86%)</div><div class="res-val sell" id="s1-${s.symbol}">-</div></div>
+                            <div class="res-box"><div class="res-label">2차 매도 (평단 +14.49%)</div><div class="res-val sell" id="s2-${s.symbol}">-</div></div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += html;
+            });
+        }
+
+        function saveAvg(symbol, val) {
+            localStorage.setItem(symbol + '_avg', val);
+        }
+
+        async function calculateAll() {
+            for (let s of stocks) {
+                try {
+                    // Yahoo Finance 비공개 API를 활용한 시세 수집
+                    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`);
+                    const data = await res.json();
+                    const prevClose = data.chart.result[0].meta.chartPreviousClose;
+                    
+                    document.getElementById(`close-${s.symbol}`).innerText = `전종: $${prevClose.toFixed(2)}`;
+                    
+                    const avg = parseFloat(document.getElementById(`avg-${s.symbol}`).value);
+
+                    // 매수 계산 (전일종가 기준)
+                    const b1 = prevClose * (1 + s.ratio.b1 / 100);
+                    const b2 = prevClose * (1 + s.ratio.b2 / 100);
+                    document.getElementById(`b1-${s.symbol}`).innerText = `$${b1.toFixed(2)}`;
+                    document.getElementById(`b2-${s.symbol}`).innerText = `$${b2.toFixed(2)}`;
+
+                    // 매도 계산 (평균단가 기준)
+                    if (avg && avg > 0) {
+                        const s1 = avg * (1 + s.ratio.s1 / 100);
+                        const s2 = avg * (1 + s.ratio.s2 / 100);
+                        document.getElementById(`s1-${s.symbol}`).innerText = `$${s1.toFixed(2)}`;
+                        document.getElementById(`s2-${s.symbol}`).innerText = `$${s2.toFixed(2)}`;
+                    } else {
+                        document.getElementById(`s1-${s.symbol}`).innerText = '평단 필요';
+                        document.getElementById(`s2-${s.symbol}`).innerText = '평단 필요';
+                    }
+                } catch (e) {
+                    alert(`${s.symbol} 시세를 불러오지 못했습니다.`);
+                }
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
