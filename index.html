@@ -19,13 +19,15 @@
         .res-val { font-weight: bold; color: #2d3748; margin-top: 2px; }
         .buy { color: #e53e3e; }
         .sell { color: #3182ce; }
-        button { width: 100%; padding: 12px; background: #3182ce; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 15px; }
+        button { width: 100%; padding: 12px; background: #3182ce; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-bottom: 15px; cursor: pointer; }
+        .status-msg { text-align: center; font-size: 12px; color: #718096; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
     <h2>LOC 매매 가격 계산기</h2>
-    <button onclick="calculateAll()">전일종가 불러오기 & 계산</button>
+    <button id="calcBtn" onclick="calculateAll()">전일종가 불러오기 & 계산</button>
+    <div id="status" class="status-msg">버튼을 누르면 시세를 불러옵니다.</div>
 
     <div id="app"></div>
 
@@ -37,9 +39,9 @@
             { symbol: 'DRAM', ratio: { b1: 1.10, b2: -0.42, s1: 4.86, s2: 14.49 } }
         ];
 
-        // 초기 화면 생성
         function init() {
             const container = document.getElementById('app');
+            container.innerHTML = '';
             stocks.forEach(s => {
                 const savedAvg = localStorage.getItem(s.symbol + '_avg') || '';
                 const html = `
@@ -50,7 +52,7 @@
                         </div>
                         <div class="input-group">
                             <label>평균단가 ($)</label>
-                            <input type="number" step="0.01" id="avg-${s.symbol}" value="${savedAvg}" onchange="saveAvg('${s.symbol}', this.value)">
+                            <input type="number" step="0.01" id="avg-${s.symbol}" value="${savedAvg}" oninput="saveAvg('${s.symbol}', this.value)">
                         </div>
                         <div class="result-grid">
                             <div class="res-box"><div class="res-label">1차 매수 (전종 +1.10%)</div><div class="res-val buy" id="b1-${s.symbol}">-</div></div>
@@ -68,38 +70,69 @@
             localStorage.setItem(symbol + '_avg', val);
         }
 
+        async function fetchStockPrice(symbol) {
+            // CORS 회피용 우회 프록시 및 Yahoo Finance API 활용
+            const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+            
+            const res = await fetch(proxyUrl);
+            const proxyData = await res.json();
+            const data = JSON.parse(proxyData.contents);
+            
+            const meta = data.chart.result[0].meta;
+            const quotes = data.chart.result[0].indicators.quote[0].close;
+            
+            // 전일 종가 탐색 (최근 종가 값 가져오기)
+            let prevClose = meta.chartPreviousClose;
+            if (!prevClose && quotes && quotes.length > 0) {
+                const validQuotes = quotes.filter(p => p !== null);
+                prevClose = validQuotes[validQuotes.length - 1];
+            }
+            return prevClose;
+        }
+
         async function calculateAll() {
+            const btn = document.getElementById('calcBtn');
+            const status = document.getElementById('status');
+            btn.disabled = true;
+            status.innerText = '시세 데이터를 불러오는 중...';
+
             for (let s of stocks) {
                 try {
-                    // Yahoo Finance 비공개 API를 활용한 시세 수집
-                    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}`);
-                    const data = await res.json();
-                    const prevClose = data.chart.result[0].meta.chartPreviousClose;
+                    const prevClose = await fetchStockPrice(s.symbol);
                     
-                    document.getElementById(`close-${s.symbol}`).innerText = `전종: $${prevClose.toFixed(2)}`;
-                    
-                    const avg = parseFloat(document.getElementById(`avg-${s.symbol}`).value);
+                    if (prevClose) {
+                        document.getElementById(`close-${s.symbol}`).innerText = `전종: $${prevClose.toFixed(2)}`;
+                        
+                        const avgInput = document.getElementById(`avg-${s.symbol}`).value;
+                        const avg = parseFloat(avgInput);
 
-                    // 매수 계산 (전일종가 기준)
-                    const b1 = prevClose * (1 + s.ratio.b1 / 100);
-                    const b2 = prevClose * (1 + s.ratio.b2 / 100);
-                    document.getElementById(`b1-${s.symbol}`).innerText = `$${b1.toFixed(2)}`;
-                    document.getElementById(`b2-${s.symbol}`).innerText = `$${b2.toFixed(2)}`;
+                        // 매수가 계산 (전일종가 기준)
+                        const b1 = prevClose * (1 + s.ratio.b1 / 100);
+                        const b2 = prevClose * (1 + s.ratio.b2 / 100);
+                        document.getElementById(`b1-${s.symbol}`).innerText = `$${b1.toFixed(2)}`;
+                        document.getElementById(`b2-${s.symbol}`).innerText = `$${b2.toFixed(2)}`;
 
-                    // 매도 계산 (평균단가 기준)
-                    if (avg && avg > 0) {
-                        const s1 = avg * (1 + s.ratio.s1 / 100);
-                        const s2 = avg * (1 + s.ratio.s2 / 100);
-                        document.getElementById(`s1-${s.symbol}`).innerText = `$${s1.toFixed(2)}`;
-                        document.getElementById(`s2-${s.symbol}`).innerText = `$${s2.toFixed(2)}`;
+                        // 매도가 계산 (평균단가 기준)
+                        if (avg && avg > 0) {
+                            const s1 = avg * (1 + s.ratio.s1 / 100);
+                            const s2 = avg * (1 + s.ratio.s2 / 100);
+                            document.getElementById(`s1-${s.symbol}`).innerText = `$${s1.toFixed(2)}`;
+                            document.getElementById(`s2-${s.symbol}`).innerText = `$${s2.toFixed(2)}`;
+                        } else {
+                            document.getElementById(`s1-${s.symbol}`).innerText = '평단 필요';
+                            document.getElementById(`s2-${s.symbol}`).innerText = '평단 필요';
+                        }
                     } else {
-                        document.getElementById(`s1-${s.symbol}`).innerText = '평단 필요';
-                        document.getElementById(`s2-${s.symbol}`).innerText = '평단 필요';
+                        document.getElementById(`close-${s.symbol}`).innerText = '오류';
                     }
                 } catch (e) {
-                    alert(`${s.symbol} 시세를 불러오지 못했습니다.`);
+                    console.error(e);
+                    document.getElementById(`close-${s.symbol}`).innerText = '불러오기 실패';
                 }
             }
+            status.innerText = '최신 종가 반영 완료';
+            btn.disabled = false;
         }
 
         window.onload = init;
